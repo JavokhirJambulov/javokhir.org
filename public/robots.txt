@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://javokhir.org/sitemap.xml
