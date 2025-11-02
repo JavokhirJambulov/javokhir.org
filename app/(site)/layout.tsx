@@ -14,6 +14,9 @@ export const metadata: Metadata = {
     default: SITE.title,
     template: '%s · Javokhir'
   },
+  icons: {
+    icon: '/favicon.ico'
+  },
   description: SITE.description,
   metadataBase: new URL(SITE.url),
   openGraph: {

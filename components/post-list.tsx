@@ -18,15 +18,20 @@ export default function PostList({ posts }: { posts: Post[] }) {
           <h2 className="mb-4 text-xl font-semibold">{year}</h2>
           <ul className="space-y-3">
             {byYear[year].map(post => (
-              <li key={post.slug} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                <Link href={`/posts/${post.slug}`} className="font-medium hover:underline">
-                  {post.frontmatter.title}
-                </Link>
-                <div className="sm:text-right">
-                  <PostMeta date={post.frontmatter.date} readingTime={post.readTime} />
-                  {post.frontmatter.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{post.frontmatter.description}</p>
-                  )}
+              <li key={post.slug} >
+                <div>
+                  <div  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                    <Link href={`/posts/${post.slug}`} className="font-medium hover:underline">
+                      {post.frontmatter.title}
+                    </Link>
+                    <div className="sm:text-right">
+                      <PostMeta date={post.frontmatter.date} readingTime={post.readTime} />
+                      {post.frontmatter.description && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{post.frontmatter.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="h-px bg-gradient-to-r mt-5 from-transparent via-black to-transparent dark:via-gray-100" />
                 </div>
               </li>
             ))}
