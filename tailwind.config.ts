@@ -1,14 +1,16 @@
 import type { Config } from 'tailwindcss'
-export default {
+import typography from '@tailwindcss/typography'
+
+const config: Config = {
   darkMode: 'class',
   content: [
     './app/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
-    './content/**/*.{md,mdx}'
+    './content/**/*.{md,mdx}',
   ],
   theme: {
     extend: {
-      typography: ({ theme }) => ({
+      typography: ({ theme }: { theme: (path: string) => string }) => ({
         DEFAULT: {
           css: {
             '--tw-prose-links': theme('colors.gray.900'),
@@ -18,5 +20,7 @@ export default {
       })
     }
   },
-  plugins: [require('@tailwindcss/typography')]
-} satisfies Config
+  plugins: [typography],
+}
+
+export default config
