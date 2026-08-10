@@ -1,0 +1,135 @@
+---
+title: "What Perfetto Showed Me About Android Startup Time"
+description: "How tracing uncovered Google Play Billing work on the startup path and helped cut the slow cold-start rate by roughly 55%."
+date: 2026-07-10
+tags:
+  - android
+  - perfetto
+  - performance
+  - kotlin
+---
+
+Startup performance is easy to describe vaguely: *the app feels slow*, *the splash screen stays too long*, or *opening this screen takes a moment*. The hard part is identifying what is actually consuming that time.
+
+I used Perfetto to turn that vague feeling into a timeline. My goal was simple: measure how long particular activities and layouts took to load, find work happening too early, and remove it from the path to a usable screen.
+
+That investigation led to one particularly clear improvement: we deferred initialization of the Google Play Billing Library from `MainActivity` until a user entered a flow that actually needed it.
+
+## The result: fewer slow cold starts
+
+After the change rolled out, the Google Play Console's **slow cold start rate** dropped from roughly **10% to 4.5%**—an approximately **55% relative reduction**.
+
+![An anonymized Google Play Console chart showing the slow cold-start rate declining from around 10 percent to around 4.5 percent over June through August 2026.](/perfetto-cold-start-rate.png)
+
+*An anonymized production trend. This is a slow cold-start **rate**, not a measurement claiming every launch took half as long. The line shows the share of cold starts classified as slow falling after the rollout.*
+
+That distinction is worth making. “Twice as fast” refers to duration, while this chart measures the percentage of launches that crossed Google Play's slow-start threshold. The outcome is still meaningful: substantially fewer users encountered a slow cold start.
+
+## Start with a narrow question
+
+“Make startup faster” is too broad to be useful. I started with questions that a trace could answer:
+
+- Which activity is taking the longest to become visible?
+- Is the main thread busy with initialization while the first screen is trying to render?
+- Does a particular layout take noticeably longer to inflate, measure, or draw?
+- Which SDKs or packages are doing work before the user can benefit from them?
+
+This matters because an app can be doing perfectly reasonable work overall and still be doing it at the wrong time. Startup has a critical path: work on that path delays the first useful frame; work outside it often does not.
+
+## Record the path the user actually takes
+
+Perfetto gives a time-aligned view of what the app and the system are doing. For startup analysis, I captured a representative launch, then followed the main/UI thread through application creation, activity creation, and the first layout work.
+
+I tried to keep the comparison honest:
+
+- use the same device and build type;
+- repeat the same launch path;
+- be explicit about whether I was testing a process start, a warm return, or opening a screen inside an already-running app; and
+- compare the same trace regions after each change.
+
+That last point is important. A trace is most useful when it answers one question at a time. If every test changes device state, network state, and initialization order, it becomes easy to mistake noise for an improvement.
+
+## Read the trace as a dependency story
+
+I was not looking for one suspiciously long method and assuming it explained everything. I looked at the ordering of events instead:
+
+1. the app process starts;
+2. application-level initialization begins;
+3. the first activity is created;
+4. its layout is inflated and rendered; and
+5. the first useful UI is available.
+
+When an activity or layout was slow, the trace let me ask whether the delay belonged to that UI itself or whether it was waiting behind unrelated startup work. That distinction changes the fix. Optimizing a layout will not help much if the main thread is blocked by a dependency initialization that the screen does not need yet.
+
+## The finding: Billing was initialized too early
+
+The trace showed that the Google Play Billing Library was being initialized from `MainActivity`, even for users who were not about to purchase anything. Billing is necessary for a paywall or purchase flow; it is not necessary to render the first useful screen for every session.
+
+In simplified form, the startup path looked like this:
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        initializeBillingClient() // Runs on every cold start.
+        showApp()
+    }
+}
+```
+
+The fix was to move that work behind the flow that needs it:
+
+```kotlin
+class PaywallCoordinator {
+    fun openPaywall() {
+        initializeBillingClientIfNeeded()
+        showPaywall()
+    }
+}
+```
+
+The code is intentionally simplified, but the principle is the important part: retain only genuinely startup-critical work in `MainActivity`; initialize a feature dependency when the user reaches the feature that requires it.
+
+## Deferring work is a design decision, not a shortcut
+
+Moving initialization later has to preserve correctness. In practice, I would check that a deferred dependency:
+
+- initializes only once, even if the user opens the feature repeatedly;
+- reports initialization failures clearly and can retry safely;
+- does not block the UI thread while its flow is being prepared; and
+- is ready before the feature tries to use it.
+
+This reasoning also applies to other SDK and Firebase-related work. The lesson is not that a particular library is inherently slow. It is to ask: *is this work essential before the first screen, or is it merely convenient to run early?*
+
+## Validate with another trace, not intuition
+
+After moving the non-critical work out of `MainActivity`, I captured the same launch path again in Perfetto and compared the activity and layout regions that motivated the change. I then used the production slow-cold-start trend as an additional outcome signal.
+
+That validation loop was the most valuable part:
+
+1. measure a representative path;
+2. identify work on the critical path;
+3. make one focused change;
+4. trace the same path again; and
+5. watch the production metric after rollout.
+
+It prevented me from treating a shorter splash screen or a subjective feeling of speed as proof. A startup improvement is only useful if the application still initializes reliably and the first screen reaches a usable state sooner.
+
+## What I would do again
+
+Perfetto changed the way I approach performance issues. Instead of starting with a list of common optimizations, I start with a timeline and a question.
+
+- Measure the exact activity and layout path that users experience.
+- Separate essential startup work from work that is merely convenient to run early.
+- Be careful with dependency initialization: the problem is often *when* it runs, not the dependency itself.
+- Change one thing at a time and validate it in the trace.
+- Keep claims proportional to the data: a rate improvement is not the same as a duration measurement.
+
+For Android engineers, that is the practical value of tracing: it replaces guesses about launch performance with a view of the work that stands between process start and the first useful screen.
+
+## Further reading
+
+- [Android system tracing overview](https://developer.android.com/topic/performance/tracing)
+- [Perfetto: start using tracing](https://perfetto.dev/docs/getting-started/start-using-perfetto)
+- [Android guidance for analysing and optimizing app startup](https://developer.android.com/topic/performance/appstartup/analysis-optimization)
