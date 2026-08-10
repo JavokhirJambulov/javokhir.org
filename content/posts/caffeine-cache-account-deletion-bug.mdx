@@ -1,0 +1,147 @@
+---
+title: "How Two Caffeine Caches Broke Account Deletion"
+description: "A subtle JVM backend bug kept deleted accounts visible, and the real cause was not the database—it was duplicate DAO instances with independent caches."
+date: 2026-08-10
+tags:
+  - scala
+  - jvm
+  - caffeine
+  - debugging
+  - testing
+---
+
+Account deletion sounds like a straightforward backend feature: receive the request, wait for the required period, delete the account, and clear anything that should no longer be available.
+
+That was also what our system appeared to do. The deletion request was stored correctly, the scheduled process ran, and the deletion code completed. But afterward, the user account could still appear to exist.
+
+I investigated the issue and eventually found that the problem was not the deletion query itself. It was the lifetime of two JVM objects and the two independent Caffeine caches hidden inside them.
+
+## The symptom
+
+Our backend does not immediately remove an account when a user requests deletion. It stores the request and completes the deletion after a period of time. This gives the system a clear workflow for pending and completed deletion requests.
+
+The bug appeared at the end of that workflow:
+
+1. A user requested account deletion.
+2. The backend stored the request.
+3. The scheduled deletion process ran later.
+4. The account was deleted through one data-access path.
+5. Another part of the backend could still return the old user data.
+
+From the application's point of view, the deletion had failed. This was especially concerning because account deletion is not just another CRUD operation. It is a promise to the user about the lifecycle of their data.
+
+## Looking past the database
+
+My first instinct was to follow the deletion flow: the request record, the scheduled job, the database operation, and the code that ran afterward. Each individual step looked reasonable.
+
+The confusing part was that the account could still be returned even after the deletion path completed. That made me look at how reads were being served rather than only how deletion was performed.
+
+We use [Caffeine](https://github.com/ben-manes/caffeine) as an in-memory cache in our JVM backend. A simplified version of the data-access object looked something like this:
+
+```scala
+final class UserDao(database: Database) {
+  private val cache = Caffeine.newBuilder()
+    .maximumSize(10_000)
+    .build[UserId, User]()
+
+  def findById(id: UserId): Future[Option[User]] = {
+    // Read from the cache, then fall back to the database.
+  }
+
+  def delete(id: UserId): Future[Unit] = {
+    // Delete from the database, then invalidate this cache.
+  }
+}
+```
+
+The important word is **this** cache.
+
+The backend had created two `UserDao` instances. Each instance contained its own Caffeine cache:
+
+```scala
+val userDaoForReads = new UserDao(database)
+val userDaoForDeletion = new UserDao(database)
+```
+
+They talked to the same database, but they did not share the same in-memory state.
+
+When the deletion workflow used `userDaoForDeletion`, it invalidated the cache owned by that object. Meanwhile, `userDaoForReads` still held the previously cached user. A later request could be answered from that stale cache without checking the database again.
+
+The deletion code was doing exactly what it had been written to do. It simply did not know that another cache existed.
+
+## Cache ownership follows object ownership
+
+This bug changed the way I think about in-memory caching.
+
+It is easy to describe a service as having "a user cache." At runtime, however, there is no abstract cache. There are concrete objects with concrete lifetimes. If a cache is stored inside a DAO, every DAO instance may become a separate cache owner.
+
+The object graph was therefore part of the cache-consistency model.
+
+This also explained why the issue was difficult to notice during an ordinary code review. Both DAO instances were valid. Both used the same implementation. Both could read from the same database. Nothing in the class itself looked obviously incorrect. The inconsistency only appeared when the two instances were used by different parts of the account lifecycle.
+
+## The fix
+
+I fixed the problem by consolidating the backend onto one shared `UserDao` instance for the relevant read and deletion paths.
+
+```scala
+val userDao = new UserDao(database)
+
+val profileService = new ProfileService(userDao)
+val accountDeletionService = new AccountDeletionService(userDao)
+```
+
+Now the same DAO owns the cache used for reading and the invalidation triggered by deletion. When an account is removed, the authoritative cache entry is invalidated as part of the same workflow.
+
+An alternative would have been to keep multiple DAO instances and attempt to invalidate every cache. I decided against that approach because it would preserve the underlying architectural problem. A new instance added later could silently reintroduce the bug. A single application-scoped data-access owner makes the invariant much easier to understand:
+
+> All user reads and mutations that depend on the local cache go through the same cache owner.
+
+## The regression test that matters
+
+Fixing the production issue was only half of the work. I also added a ScalaTest regression case so that the same object-lifetime mistake would not quietly return later.
+
+The important detail was warming the cache before deletion. A test that only inserts a database row, deletes it, and checks the database would completely miss the original failure.
+
+The regression test follows the user-visible path:
+
+```scala
+"account deletion" should "invalidate cached user state" in {
+  val user = createTestUser()
+
+  // Populate the same read path that previously served stale data.
+  profileService.findUser(user.id).futureValue shouldBe Some(user)
+
+  accountDeletionService.deleteNow(user.id).futureValue
+
+  // Verify behavior through the read service, not only the database.
+  profileService.findUser(user.id).futureValue shouldBe None
+}
+```
+
+The production test includes the application wiring relevant to the original bug, but this simplified example shows the main idea: reproduce the cached state first, perform the deletion, and verify the result through the path that users actually reach.
+
+## What I learned
+
+This incident left me with a few lessons that apply beyond Caffeine or Scala.
+
+### Test observable behavior, not only storage
+
+A database assertion can say that a row is gone while the application continues serving stale data. For cached systems, the public read path is part of the definition of "deleted."
+
+### Warm the cache in regression tests
+
+Cache bugs often disappear in clean test environments. If a failure depends on stale state, the test must deliberately create that state.
+
+### Review object lifetimes as part of the architecture
+
+Dependency injection and object construction can affect correctness, not just code organization. Two instances of a stateful dependency are not always equivalent to one shared instance.
+
+### Prefer one clear owner for invalidation
+
+Trying to notify an unknown number of cache instances is fragile. When possible, make cache ownership explicit and route related reads and mutations through that owner.
+
+## Closing thought
+
+The final code change was not large. The difficult part was recognizing that the stale account was not primarily a database problem—it was an object-identity and cache-ownership problem.
+
+Those are some of my favorite engineering bugs: the symptom appears in one layer, the root cause lives in another, and the fix improves both the immediate behavior and the architecture around it.
