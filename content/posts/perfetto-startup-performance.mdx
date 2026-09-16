@@ -1,6 +1,6 @@
 ---
 title: "What Perfetto Showed Me About Android Startup Time"
-description: "How tracing uncovered Google Play Billing work on the startup path and helped cut the slow cold-start rate by roughly 55%."
+description: "How tracing uncovered Google Play Billing work on the startup path and substantially improved production slow-start metrics."
 date: 2026-07-10
 tags:
   - android
@@ -17,13 +17,7 @@ That investigation led to one particularly clear improvement: we deferred initia
 
 ## The result: fewer slow cold starts
 
-After the change rolled out, the Google Play Console's **slow cold start rate** dropped from roughly **10% to 4.5%**—an approximately **55% relative reduction**.
-
-![An anonymized Google Play Console chart showing the slow cold-start rate declining from around 10 percent to around 4.5 percent over June through August 2026.](/perfetto-cold-start-rate.png)
-
-*An anonymized production trend. This is a slow cold-start **rate**, not a measurement claiming every launch took half as long. The line shows the share of cold starts classified as slow falling after the rollout.*
-
-That distinction is worth making. “Twice as fast” refers to duration, while this chart measures the percentage of launches that crossed Google Play's slow-start threshold. The outcome is still meaningful: substantially fewer users encountered a slow cold start.
+Production slow-start metrics improved substantially after rollout. This reflects a reduction in the share of launches that crossed Google Play's slow-start threshold, rather than a claim that every launch completed proportionally faster.
 
 ## Start with a narrow question
 
