@@ -9,7 +9,10 @@ export default function AboutPage() {
         Recently, I’ve worked on Soundcorset’s web canvas drawing tools, IndexedDB ↔ AWS S3 sync, and modernizing Android billing and sign‑in flows.
       </p>
       <p>
-        Résumé: <a className="nav-link underline" href="/Javokhir%20Resume.pdf" target="_blank" rel="noreferrer">PDF</a>
+        Résumés:{' '}
+        <a className="nav-link underline" href="/Javokhir-Android-Engineer-Resume.pdf" target="_blank" rel="noopener noreferrer">Android Engineer</a>
+        {' · '}
+        <a className="nav-link underline" href="/Javokhir-Web-Engineer-Resume.pdf" target="_blank" rel="noopener noreferrer">Web Engineer</a>
       </p>
     </section>
   )
