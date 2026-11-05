@@ -1,0 +1,108 @@
+---
+title: "Why My Android Service Kept Running After I Closed the App"
+description: "A recording had stopped and its notification was gone, but Android still considered the service started. Here's how I tracked down the lifecycle gap."
+date: 2026-11-05
+tags:
+  - android
+  - debugging
+  - services
+---
+
+I stopped a recording, watched its notification disappear, and dismissed the app from Recents. Everything looked finished. But when I inspected Android's service state, the recording service was still started.
+
+The recording itself wasn't continuing. The problem was that **ending a recording and stopping its Android service were being treated as the same operation**.
+
+Here's how I found the gap and changed the cleanup flow. The code below uses generic names and is simplified from the original implementation.
+
+## The service was still started
+
+I could reproduce the issue with this sequence:
+
+1. Start recording.
+2. Leave the app while recording continues.
+3. Stop recording.
+4. Return to the app, then swipe its task away from Recents.
+5. Inspect the service state.
+
+I used `dumpsys` to check what Android thought was running:
+
+```bash
+adb shell dumpsys activity services com.example.app
+```
+
+The relevant part of the output looked like this (with identifiers removed):
+
+```text
+RecordingService
+  startRequested=true
+  lastStartId=1
+  hasBound=false
+```
+
+`startRequested=true` was the clue. No Activity was bound to the service, but Android still considered it a **started service**.
+
+This mattered more than finding the app's process in memory. Android can keep a process cached even after its components have stopped. The service record showed a more specific lifecycle issue.
+
+## Why removing the notification wasn't enough
+
+The recording cleanup included a call like this:
+
+```kotlin
+stopForeground(STOP_FOREGROUND_REMOVE)
+```
+
+That removes the foreground-service notification and foreground status. It does **not** stop the service itself. A service started through `startService()` or `startForegroundService()` still needs a stop request, such as `stopSelf()` or `stopService()` ([Android Service API](https://developer.android.com/reference/android/app/Service#stopForeground(int))).
+
+The service also supported Activity binding. That introduces another distinction: **started and bound lifetimes are independent**. Unbinding an Activity doesn't clear the service's started state. Conversely, requesting `stopSelf()` doesn't necessarily destroy the service immediately while clients remain bound ([Android bound services](https://developer.android.com/develop/background-work/services/bound-services)).
+
+Our cleanup was partly tied to the Activity's destruction. It avoided stopping the service while recording was active, which sounded reasonable at first. But consider this sequence:
+
+- The user leaves the Activity while a recording is still active.
+- Activity cleanup skips stopping the service.
+- The recording finishes later.
+- The Activity's destruction callback doesn't run a second time.
+
+There was no reliable final step clearing the service's started state.
+
+## Moving the stop logic into the service
+
+I changed the ownership of cleanup: the service should manage its own lifetime rather than relying on an Activity to do it.
+
+There were two paths to handle:
+
+**Normal stop:** When recording finishes and its output has been finalized, the service should remove foreground status and stop itself.
+
+**Task dismissal:** In this app, swiping the task away should end an active recording. `onTaskRemoved()` lets the running service react to that specific event:
+
+```kotlin
+override fun onTaskRemoved(rootIntent: Intent?) {
+    requestFinishRecording()
+    super.onTaskRemoved(rootIntent)
+}
+```
+
+`requestFinishRecording()` represents the app's stop flow, not an Android API. It requests a stop if recording is active, waits if the file is already being finalized, or proceeds to service cleanup if there's no work left. The service's recording-completion path then performs the final cleanup:
+
+```kotlin
+private fun onRecordingFinalized() {
+    stopForeground(STOP_FOREGROUND_REMOVE)
+    stopSelf()
+}
+```
+
+These snippets show the lifecycle responsibilities, not the complete production implementation. In particular, if a new recording starts while an older one is finishing, the older completion must not stop the newer session's service. Session identifiers and, where appropriate, `stopSelfResult(startId)` help guard against stale completion callbacks.
+
+One caveat: `onTaskRemoved()` is called when the application's task is removed while the service is running, but **not** when the service is configured with `android:stopWithTask="true"`. It also isn't a general callback for force-stops or every kind of process termination ([Android Service API](https://developer.android.com/reference/android/app/Service#onTaskRemoved(android.content.Intent))).
+
+## Checking the behavior again
+
+I tested the lifecycle as separate scenarios:
+
+- Pressing Home should leave an active recording running.
+- Swiping the task away should request a recording stop and allow the file to finalize.
+- Stopping a recording normally should clear the service's started state after finalization.
+- Starting a new recording while an older session finishes must not let the old completion stop the new one.
+
+For each stop path, `dumpsys` is the way to verify that the service is no longer marked as started after cleanup and any remaining clients have unbound.
+
+The main lesson was simple: **a stopped recording, a removed notification, and a stopped service are three different states**. Making the service own its cleanup—and checking the actual service state rather than what the UI showed—made the lifecycle much easier to reason about.
