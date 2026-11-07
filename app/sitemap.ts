@@ -3,7 +3,7 @@ import { getAllPosts } from '@/lib/posts'
 
 export default async function sitemap() {
   const now = new Date().toISOString()
-  const routes = ['/', '/projects', '/posts', '/about', '/contact']
+  const routes = ['/', '/projects', '/posts']
     .map((r) => ({ url: `${SITE.url}${r}`, lastModified: now }))
 
   const posts = getAllPosts().map(p => ({

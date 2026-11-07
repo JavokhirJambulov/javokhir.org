@@ -5,7 +5,7 @@ import ThemeToggle from '@/components/theme-toggle'
 import ResumeMenu from '@/components/resume-menu'
 
 const nav = [
-  { href: '/about', label: 'About' },
+  { href: '/', label: 'Home' },
   { href: '/projects', label: 'Projects' },
   { href: '/posts', label: 'Posts' },
 ]
@@ -15,9 +15,9 @@ export default function Header() {
   return (
     <header className="flex flex-col sm:flex-row items-center justify-between py-8">
       <Link href="/" className="flex items-center font-semibold">javokhir.org</Link>
-      <nav className="flex items-center gap-3 sm:gap-5 mt-3 sm:mt-0">
+      <nav aria-label="Main navigation" className="flex items-center gap-3 sm:gap-5 mt-3 sm:mt-0">
         {nav.map(i => (
-          <Link key={i.href} href={i.href} className={`nav-link ${pathname === i.href ? 'underline' : ''}`}>{i.label}</Link>
+          <Link key={i.href} href={i.href} aria-current={pathname === i.href ? 'page' : undefined} className={`nav-link ${pathname === i.href ? 'underline' : ''}`}>{i.label}</Link>
         ))}
         <ResumeMenu />
         <ThemeToggle />

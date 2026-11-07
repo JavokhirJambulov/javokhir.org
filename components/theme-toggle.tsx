@@ -1,14 +1,15 @@
 'use client'
 import { useTheme } from 'next-themes'
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
+
+const subscribe = () => () => {}
 
 export default function ThemeToggle() {
-  const { theme, setTheme, resolvedTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+  const { setTheme, resolvedTheme } = useTheme()
+  // Match the server snapshot until hydration completes.
+  const mounted = useSyncExternalStore(subscribe, () => true, () => false)
 
-  useEffect(() => setMounted(true), [])
-
-  const active = mounted ? (theme ?? resolvedTheme) : undefined
+  const active = mounted ? resolvedTheme : undefined
   return (
     <button
       aria-label="Toggle theme"

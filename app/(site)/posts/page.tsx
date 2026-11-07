@@ -1,8 +1,12 @@
 import { getAllPosts } from '@/lib/posts'
 import PostList from '@/components/post-list'
-import type { Metadata } from 'next'
+import { pageMetadata } from '@/lib/site'
 
-export const metadata: Metadata = { title: 'Posts' }
+export const metadata = pageMetadata(
+  'Posts',
+  'Notes by Javokhir Jambulov on building web and Android products, debugging, performance, and backend systems.',
+  '/posts'
+)
 
 export default function PostsPage() {
   const posts = getAllPosts()

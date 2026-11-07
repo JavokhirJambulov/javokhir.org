@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 
 const resumes = [
+  { href: '/Javokhir-Jambulov-Resume.pdf', label: 'Software Engineer' },
   { href: '/Javokhir-Android-Engineer-Resume.pdf', label: 'Android Engineer' },
   { href: '/Javokhir-Web-Engineer-Resume.pdf', label: 'Web Engineer' },
 ]

@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import { getAllPosts, getPostBySlug } from '@/lib/posts'
 import { renderMDX } from '@/lib/mdx'
 import Prose from '@/components/prose'
 import PostMeta from '@/components/post-meta'
+import { pageMetadata, SITE } from '@/lib/site'
 
 export const dynamicParams = false
 
@@ -10,17 +12,16 @@ export function generateStaticParams() {
   return getAllPosts().map(p => ({ slug: p.slug }))
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }) {
-  const post = getPostBySlug(params.slug)
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const post = getPostBySlug(slug)
   if (!post) return {}
-  return {
-    title: post.frontmatter.title,
-    description: post.frontmatter.description
-  }
+  return pageMetadata(post.frontmatter.title, post.frontmatter.description ?? SITE.description, `/posts/${slug}`, 'article')
 }
 
-export default async function PostPage({ params }: { params: { slug: string } }) {
-  const post = getPostBySlug(params.slug)
+export default async function PostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params
+  const post = getPostBySlug(slug)
   if (!post) return notFound()
   const { content } = await renderMDX(post.content)
   return (
@@ -33,7 +34,7 @@ export default async function PostPage({ params }: { params: { slug: string } })
         ) : null}
       </header>
       <Prose>{content}</Prose>
-      <p className="mt-8"><a href="/posts" className="nav-link underline">← Back to all posts</a></p>
+      <p className="mt-8"><Link href="/posts" className="nav-link underline">← Back to all posts</Link></p>
     </article>
   )
 }

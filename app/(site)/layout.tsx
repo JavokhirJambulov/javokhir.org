@@ -19,15 +19,16 @@ export const metadata: Metadata = {
   },
   description: SITE.description,
   metadataBase: new URL(SITE.url),
+  alternates: { canonical: '/' },
   openGraph: {
     title: SITE.title,
     description: SITE.description,
     url: SITE.url,
     siteName: 'javokhir.org',
-    images: ['/og.png'],
+    images: [{ url: '/og.png', width: 1200, height: 630, alt: 'Javokhir Jambulov · Software Engineer · Web, mobile, backend & AI' }],
     type: 'website'
   },
-  twitter: { card: 'summary_large_image', title: SITE.title, description: SITE.description }
+  twitter: { card: 'summary_large_image', title: SITE.title, description: SITE.description, images: ['/og.png'] }
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -45,7 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="flex-grow">
             <div className="container">
               <Header />
-              <main className="py-10">{children}</main>
+              <main id="main-content" className="py-10">{children}</main>
             </div>
           </div>
           <Footer/>
